@@ -1,0 +1,9 @@
+- todo
+  - [ ] add some unit tests
+  - [ ] finish code to read <source> elements
+  - [ ] write code to convert to unified indices
+  - [ ] write node traversal code
+  - [ ] output to obj format
+  - [ ] add material/texture support
+  - [ ] add output to a custom, but ultra-simple, format
+  - [ ] add control via command line params

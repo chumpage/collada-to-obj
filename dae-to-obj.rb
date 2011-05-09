@@ -1,4 +1,4 @@
-#!/usr/bin/ruby1.9.1
+#!/usr/bin/ruby
 require 'rexml/document'
 
 class Node
@@ -201,6 +201,9 @@ def read_geometry(geom_elem, id_table)
 end
 
 # main
-doc = REXML::Document.new(File.open('model.dae'))
-id_table = build_id_table(doc)
-scene_nodes = read_nodes(doc.elements['/COLLADA/library_visual_scenes/visual_scene'], id_table)
+if $0 == __FILE__
+  # doc = REXML::Document.new(File.open('model.dae'))
+  # id_table = build_id_table(doc)
+  # scene_nodes = read_nodes(doc.elements['/COLLADA/library_visual_scenes/visual_scene'], id_table)
+  puts 'kaka'
+end
