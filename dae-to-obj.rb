@@ -1,6 +1,17 @@
 #!/usr/bin/ruby
 require 'rexml/document'
 
+class ColladaError < StandardError  
+end
+
+def to_int(str)
+  Integer(str) rescue raise ColladaError.new("#{str} isn't a valid integer")
+end
+
+def to_float(str)
+  Float(str) rescue raise ColladaError.new("#{str} isn't a valid float")
+end  
+
 class Node
   attr_accessor :id, :transform, :child_nodes, :instance_nodes, :instance_geoms
 
@@ -34,7 +45,7 @@ end
 def read_url(elem, attr_name)
   url = elem.attributes[attr_name]
   if url == nil or url.empty? or url[0] != "#" or url.length == 1
-    raise "missing or incorrectly formatted '#{attr_name}' attribute"
+    raise ColladaError.new("missing or incorrectly formatted '#{attr_name}' attribute")
     nil
   else
     url[1..-1]
@@ -42,9 +53,9 @@ def read_url(elem, attr_name)
 end
 
 def read_matrix(matrix_elem)
-  array = matrix_elem.text.to_s.split.map {|str_val| Float(str_val)}
+  array = matrix_elem.text.to_s.split.map {|str_val| to_float(str_val)}
   if array.count != 16
-    raise "incorrectly formatted <matrix> element"
+    raise ColladaError.new("incorrectly formatted <matrix> element")
   end
   [array[0...4], array[4...8], array[8...12], array[12...16]]
 end
@@ -68,7 +79,7 @@ def read_node(node_elem, id_table)
     node.instance_geoms << url if url != nil
   end
   if node_elem.get_elements('matrix').count > 1
-    raise "more than one <matrix> element in a node. unsupported for now."
+    raise ColladaError.new("more than one <matrix> element in a node. unsupported for now.")
   end
   matrix_elem = node_elem.elements['matrix']
   node.transform = read_matrix(matrix_elem) if matrix_elem != nil
@@ -105,33 +116,33 @@ def read_triangles_inputs(triangles_elem)
   inputs = {}
   triangles_elem.elements.each('input') do |input_elem|
     semantic = input_elem.attributes['semantic']
-    raise "missing semantic attr on <input>" if semantic == nil
+    raise ColladaError.new("missing semantic attr on <input>") if semantic == nil
     source = read_url(input_elem, 'source')
     offset_str = input_elem.attributes['offset']
-    raise "missing offset attr on <input>" if offset == nil
-    offset = Integer(offset_str)
+    raise ColladaError.new("missing offset attr on <input>") if offset == nil
+    offset = to_int(offset_str)
     set_str = input_elem.attributes['set']
-    set = set_str == nil ? 0 : Integer(set_str)
+    set = set_str == nil ? 0 : to_int(set_str)
 
     hash_val = {:source => source, :offset => offset}
     inputs[:vertex] = hash_val if semantic.upcase == "VERTEX" and inputs[:vertex] == nil
     inputs[:normal] = hash_val if semantic.upcase == "NORMAL" and inputs[:normal] == nil
     inputs[:texcoord] = hash_val if semantic.upcase == "TEXCOORD" and set == 0 and inputs[:texcoord] == nil
   end
-  raise "missing <input> with semantic=VERTEX" if inputs[:vertex] == nil
+  raise ColladaError.new("missing <input> with semantic=VERTEX") if inputs[:vertex] == nil
   inputs
 end
 
 def get_vertices_position_source(vertices_id, id_table)
   vertices_elem = id_table[vertices_id]
-  raise "couldn't find <vertices> element with id=#{vertices_id}" if !vertices_elem
+  raise ColladaError.new("couldn't find <vertices> element with id=#{vertices_id}") if !vertices_elem
   vertices_elem.elements.each('input') do |input_elem|
     semantic = input_elem.attributes['semantic']
     if semantic != nil and semantic.upcase == "POSITION"
       return read_url(input_elem, 'source')
     end
   end
-  raise "couldn't read <input> with semantic=POSITION from <vertices>"
+  raise ColladaError.new("couldn't read <input> with semantic=POSITION from <vertices>")
 end
 
 def get_triangles_index_stride(triangles_elem)
@@ -139,7 +150,7 @@ def get_triangles_index_stride(triangles_elem)
   triangles_elem.each('input') do |input_elem|
     offset_str = input_elem.attributes['offset']
     if offset_str
-      offset = Integer(offset_str)
+      offset = to_int(offset_str)
       max_offset = [max_offset, offset].max
     end
   end
@@ -149,23 +160,23 @@ end
 # returns an array of arrays, where each sub-array is a position, normal, or tex coord
 def read_source(source_id, id_table, *expected_param_names)
   source_elem = id_table[source_id]
-  raise "couldn't find <source> element with id=#{source_id}" if !source_elem
+  raise ColladaError.new("couldn't find <source> element with id=#{source_id}") if !source_elem
   technique_common_elem = source_elem.elements['technique_common']
-  raise "missing <technique_common> element in <source>" if !technique_common_elem
+  raise ColladaError.new("missing <technique_common> element in <source>") if !technique_common_elem
   accessor_elem = technique_common_elem.elements['accessor']
-  raise "missing <accessor> element in <technique_common>" if !accessor_elem
+  raise ColladaError.new("missing <accessor> element in <technique_common>") if !accessor_elem
   param_names = []
   accessor_elem.elements.each('param') do |param_elem|
     param_name = param_elem.attributes['name']
     param_type = param_elem.attributes['type']
-    raise "<param> element missing 'name' attr" if param_name == nil
-    raise "<param> element missing 'type' attr" if param_type == nil
-    raise "<param>s with type=#{param_type} are not supported" if param_type != "float"
+    raise ColladaError.new("<param> element missing 'name' attr") if param_name == nil
+    raise ColladaError.new("<param> element missing 'type' attr") if param_type == nil
+    raise ColladaError.new("<param>s with type=#{param_type} are not supported") if param_type != "float"
     param_names << param_name.upcase
   end
   expected_param_names = expected_param_names.map {|name| name.upcase}
   if expected_param_names != param_names
-    raise "got unexpected params #{param_names} in <accessor>"
+    raise ColladaError.new("got unexpected params #{param_names} in <accessor>")
   end
   
   []
@@ -190,7 +201,7 @@ end
 # returns a Mesh array
 def read_geometry(geom_elem, id_table)
   mesh_elem = geom_elem.elements['mesh']
-  raise "missing <mesh> element in <geometry>" if !mesh_elem
+  raise ColladaError.new("missing <mesh> element in <geometry>") if !mesh_elem
   meshes = []
   mesh_elem.elements.each('triangles') do |triangles_elem|
     meshes << read_triangles(triangles_elem)
@@ -202,7 +213,7 @@ end
 
 # main
 if $0 == __FILE__
-  # doc = REXML::Document.new(File.open('model.dae'))
+  # doc = REXML::Document.new(File.open('/st/misc/model.dae'))
   # id_table = build_id_table(doc)
   # scene_nodes = read_nodes(doc.elements['/COLLADA/library_visual_scenes/visual_scene'], id_table)
   puts 'kaka'
