@@ -22,6 +22,14 @@ class Node
     @instance_nodes = []
     @instance_geoms = []
   end
+
+  def ==(node)
+    @id == node.id and
+      @transform == node.transform and
+      @child_nodes == node.child_nodes and
+      @instance_nodes == node.instance_nodes and
+      @instance_geoms == node.instance_geoms
+  end
 end
 
 class ElementData
@@ -33,9 +41,9 @@ class ElementData
   end
 end
 
-def build_id_table(doc)
+def build_id_table(root)
   table = {}
-  doc.root.each_recursive do |elem|
+  root.each_recursive do |elem|
     id = elem.attributes['id']
     table[id] = ElementData.new(elem) if id != nil
   end
@@ -214,7 +222,7 @@ end
 # main
 if $0 == __FILE__
   # doc = REXML::Document.new(File.open('/st/misc/model.dae'))
-  # id_table = build_id_table(doc)
+  # id_table = build_id_table(doc.root)
   # scene_nodes = read_nodes(doc.elements['/COLLADA/library_visual_scenes/visual_scene'], id_table)
   puts 'kaka'
 end
