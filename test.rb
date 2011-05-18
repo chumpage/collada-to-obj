@@ -23,6 +23,26 @@ class TestDaeToObj < Test::Unit::TestCase
     assert_raise(ColladaError) { to_float("5 blah") }
   end
 
+  def test_partition_array
+    arr = [0, 1, 2, 3, 4, 5]
+    assert_equal(partition_array(arr, 3, 3), [[0, 1, 2], [3, 4, 5]])
+    assert_equal(partition_array(arr, 2, 3), [[0, 1], [3, 4]])
+  end
+
+  @@array_xml_1 = <<-TEST_XML
+    <array>0 1 2 3 4 5</array>
+  TEST_XML
+
+  @@array_xml_2 = <<-TEST_XML
+    <array>0 1 2.0 3 4 5</array>
+  TEST_XML
+
+  def test_read_array
+    assert_equal(read_int_array(get_root(@@array_xml_1)), [0, 1, 2, 3, 4, 5])
+    assert_equal(read_float_array(get_root(@@array_xml_1)), [0, 1, 2, 3, 4, 5])
+    assert_raise(ColladaError) { read_int_array(get_root(@@array_xml_2)) }
+  end
+
   @@url_xml_1 = <<-TEST_XML
     <input semantic="VERTEX" source="#mesh1-geometry-vertex" offset="0"/>
   TEST_XML
@@ -103,11 +123,10 @@ class TestDaeToObj < Test::Unit::TestCase
     node2 = Node.new
     node2.id = 'node2'
 
-    root = get_root(@@node_xml_1)
-    assert_equal([node1, node2], read_nodes(root, build_id_table(root)))
+    assert_equal([node1, node2], read_nodes(get_root(@@node_xml_1)))
   end
 
-  @@inputs_xml_1 = <<-TEST_XML
+  @@triangles_inputs_xml_1 = <<-TEST_XML
     <triangles material="material" count="2">
       <input semantic="VERTEX" source="#mesh1-vertex" offset="0"/>
       <input semantic="NORMAL" source="#mesh1-normal" offset="1"/>
@@ -116,4 +135,134 @@ class TestDaeToObj < Test::Unit::TestCase
     </triangles>
   TEST_XML
 
+  def test_read_triangles_inputs
+    expected = {:vertex => {:source => 'mesh1-vertex', :offset => 0},
+      :normal => {:source => 'mesh1-normal', :offset => 1},
+      :texcoord => {:source => 'mesh1-uv', :offset => 2}}
+    assert_equal(expected, read_triangles_inputs(get_root(@@triangles_inputs_xml_1)))
+  end
+
+  @@position_source_xml_1 = <<-TEST_XML
+    <mesh>
+      <source id="mesh1-position"/>
+      <vertices id="mesh1-vertex">
+        <input semantic="POSITION" source="#mesh1-position"/>
+      </vertices>
+    </mesh>
+  TEST_XML
+
+  def test_get_vertices_position_source
+    root = get_root(@@position_source_xml_1)
+    assert_equal('mesh1-position', get_vertices_position_source('mesh1-vertex', build_id_elem_hash(root)))
+  end
+
+  @@index_stride_xml_1 = <<-TEST_XML
+    <triangles material="material" count="2">
+      <input semantic="VERTEX" source="#mesh1-vertex" offset="0"/>
+      <input semantic="NORMAL" source="#mesh1-normal" offset="1"/>
+      <input semantic="TEXCOORD" source="#mesh1-uv" offset="2" set="0"/>
+      <p>0 0 0 1 0 1</p>
+    </triangles>
+  TEST_XML
+
+  def test_get_triangles_index_stride
+    assert_equal(3, get_triangles_index_stride(get_root(@@index_stride_xml_1)))
+  end
+
+  @@source_xml_1 = <<-TEST_XML
+    <source id="mesh-position">
+      <float_array id="mesh-position-array" count="6">0 1 2 3 4 5</float_array>
+      <technique_common>
+         <accessor source="#mesh-position-array" count="2" stride="3">
+            <param name="X" type="float"/>
+            <param name="Y" type="float"/>
+            <param name="Z" type="float"/>
+         </accessor>
+      </technique_common>
+    </source>
+  TEST_XML
+
+  def test_read_source
+    root = get_root(@@source_xml_1)
+    assert_equal([[0, 1, 2], [3, 4, 5]], read_source('mesh-position', build_id_elem_hash(root), 'X', 'Y', 'Z'))
+  end
+
+  def test_sort_non_unified_index
+    inputs = {:position => {:offset => 0}, :normal => {:offset => 1}, :texcoord => {:offset => 2}}
+    index = [0, 10, 20]
+    assert_equal([0, 10, 20], sort_non_unified_index(index, inputs))
+    inputs = {:position => {:offset => 3}, :normal => {:offset => 2}, :texcoord => {:offset => 0}}
+    index = [20, 100, 10, 0]
+    assert_equal([0, 10, 20], sort_non_unified_index(index, inputs))
+  end
+
+  def test_convert_to_unified_indices
+    non_unified_indices = [[0, 0, 0], [0, 1, 0], [1, 1, 1], [0, 1, 0]]
+    positions = [[0, 0, 0], [1, 1, 1]]
+    normals = [[10, 10, 10], [11, 11, 11]]
+    texcoords = [[20, 20], [21, 21]]
+    unified_indices = [0, 1, 2, 1]
+    vertices = [[[0, 0, 0], [10, 10, 10], [20, 20]],
+                [[0, 0, 0], [11, 11, 11], [20, 20]],
+                [[1, 1, 1], [11, 11, 11], [21, 21]]]
+    assert_equal([unified_indices, vertices],
+                 convert_to_unified_indices(non_unified_indices, positions, normals, texcoords))
+  end
+
+  @@triangles_xml_1 = <<-TEST_XML
+    <mesh>
+      <source id="mesh-position">
+         <float_array id="mesh-position-array" count="6">0 0 0 1 1 1</float_array>
+         <technique_common>
+            <accessor source="#mesh-position-array" count="2" stride="3">
+               <param name="X" type="float"/>
+               <param name="Y" type="float"/>
+               <param name="Z" type="float"/>
+            </accessor>
+         </technique_common>
+      </source>
+      <source id="mesh-normal">
+         <float_array id="mesh-normal-array" count="6">10 10 10 11 11 11</float_array>
+         <technique_common>
+            <accessor source="#mesh-normal-array" count="2" stride="3">
+               <param name="X" type="float"/>
+               <param name="Y" type="float"/>
+               <param name="Z" type="float"/>
+            </accessor>
+         </technique_common>
+      </source>
+      <source id="mesh-uv">
+         <float_array id="mesh-uv-array" count="4">20 20 21 21</float_array>
+         <technique_common>
+            <accessor source="#mesh-uv-array" count="2" stride="2">
+               <param name="S" type="float"/>
+               <param name="T" type="float"/>
+            </accessor>
+         </technique_common>
+      </source>
+      <vertices id="mesh-vertex">
+         <input semantic="POSITION" source="#mesh-position"/>
+      </vertices>
+      <triangles material="some-material" count="2">
+         <input semantic="VERTEX" source="#mesh-vertex" offset="0"/>
+         <input semantic="NORMAL" source="#mesh-normal" offset="1"/>
+         <input semantic="TEXCOORD" source="#mesh-uv" offset="2" set="0"/>
+         <p>0 0 0  0 1 0  1 1 1    0 0 0  0 1 0  1 1 1</p>
+      </triangles>
+    </mesh>
+  TEST_XML
+
+  def test_read_triangles
+    root = get_root(@@triangles_xml_1)
+    triangles_elem = get_child_elem(root, 'triangles')
+    id_elem_hash = build_id_elem_hash(root)
+
+    indices = [0, 1, 2, 0, 1, 2]
+    vertices = [[[0, 0, 0], [10, 10, 10], [20, 20]],
+                [[0, 0, 0], [11, 11, 11], [20, 20]],
+                [[1, 1, 1], [11, 11, 11], [21, 21]]]
+
+    assert_equal(Mesh.new(vertices, indices, :pos_norm_tex),
+                 read_triangles(triangles_elem, id_elem_hash))
+  end
 end
