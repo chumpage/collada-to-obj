@@ -25,8 +25,8 @@ class TestDaeToObj < Test::Unit::TestCase
 
   def test_partition_array
     arr = [0, 1, 2, 3, 4, 5]
-    assert_equal(partition_array(arr, 3, 3), [[0, 1, 2], [3, 4, 5]])
-    assert_equal(partition_array(arr, 2, 3), [[0, 1], [3, 4]])
+    assert_equal([[0, 1, 2], [3, 4, 5]], partition_array(arr, 3, 3))
+    assert_equal([[0, 1], [3, 4]], partition_array(arr, 2, 3))
   end
 
   @@array_xml_1 = <<-TEST_XML
@@ -38,8 +38,8 @@ class TestDaeToObj < Test::Unit::TestCase
   TEST_XML
 
   def test_read_array
-    assert_equal(read_int_array(get_root(@@array_xml_1)), [0, 1, 2, 3, 4, 5])
-    assert_equal(read_float_array(get_root(@@array_xml_1)), [0, 1, 2, 3, 4, 5])
+    assert_equal([0, 1, 2, 3, 4, 5], read_int_array(get_root(@@array_xml_1)))
+    assert_equal([0, 1, 2, 3, 4, 5], read_float_array(get_root(@@array_xml_1)))
     assert_raise(ColladaError) { read_int_array(get_root(@@array_xml_2)) }
   end
 
@@ -118,7 +118,7 @@ class TestDaeToObj < Test::Unit::TestCase
   TEST_XML
 
   def test_read_matrix
-    assert_equal(read_matrix(get_root(@@matrix_xml_1)), [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    assert_equal([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], read_matrix(get_root(@@matrix_xml_1)))
     assert_raise(ColladaError) { read_matrix(get_root(@@matrix_xml_2)) }
     assert_raise(ColladaError) { read_matrix(get_root(@@matrix_xml_3)) }
     assert_raise(ColladaError) { read_matrix(get_root(@@matrix_xml_4)) }
