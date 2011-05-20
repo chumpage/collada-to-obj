@@ -43,6 +43,36 @@ class TestDaeToObj < Test::Unit::TestCase
     assert_raise(ColladaError) { read_int_array(get_root(@@array_xml_2)) }
   end
 
+  def test_matrix_ops
+    epsilon = 1e-6
+    m1 = new_matrix(3, 3, [1,2,3, 4,5,6, 7,8,9])
+    m2 = new_matrix(3, 3, [9,8,7, 6,5,4, 3,2,1])
+    m3 = new_matrix(3, 3, [6,2,10, 1,3,0, 2,8,4])
+    m4 = new_matrix(3, 2, [1,2, 3,4, 5,6])
+    v1 = [1,2,3]
+    assert_equal([[0,0], [0,0], [0,0]], new_matrix(3, 2))
+    assert_equal([[0], [0], [0], [0]], new_matrix(4, 1))
+    assert_equal([[0,0,0,0]], new_matrix(1, 4))
+    assert_equal([[0,1], [2,3]], new_matrix(2, 2, [0,1, 2,3]))
+    assert_equal(new_matrix(3, 3, [1,0,0, 0,1,0, 0,0,1]), identity_matrix(3))
+    assert_equal([3, 3], matrix_dimensions(identity_matrix(3)))
+    assert_equal(new_matrix(3, 3, [30,24,18, 84,69,54, 138,114,90]), matrix_mult(m1, m2))
+    assert_equal([14,32,50], matrix_mult_vec(m1, v1))
+    assert_equal(new_matrix(3, 3, [2,4,6, 8,10,12, 14,16,18]), matrix_mult_scalar(m1, 2))
+    assert_equal(new_matrix(3, 2, [2,4, 6,8, 10,12]), matrix_mult_scalar(m4, 2))
+    assert_equal(new_matrix(3, 3, [1,4,7, 2,5,8, 3,6,9]), matrix_transpose(m1))
+    assert_equal(new_matrix(2, 2, [5,6, 8,9]), minor_matrix(m1, 0, 0))
+    assert_equal(new_matrix(2, 2, [1,3, 7,9]), minor_matrix(m1, 1, 1))
+    assert_in_delta(0, matrix_determinant(m1), epsilon)
+    assert_in_delta(84, matrix_determinant(m3), epsilon)
+    assert_raise(ColladaError) { matrix_inverse(m1) }
+    m3_inv = matrix_inverse(m3).flatten()
+    m3_expected_inv = [0.14285714, 0.85714286, -0.3571429, -0.04761905, 0.04761905, 0.1190476, 0.02380952, -0.52380952, 0.1904762]
+    (0...matrix_element_count(m3)).each do |i|
+      assert_in_delta(m3_expected_inv[i], m3_inv[i], epsilon)
+    end
+  end
+
   @@url_xml_1 = <<-TEST_XML
     <input semantic="VERTEX" source="#mesh1-geometry-vertex" offset="0"/>
   TEST_XML

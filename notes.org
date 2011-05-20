@@ -11,3 +11,10 @@
     - [ ] no transforms other than <matrix>
     - [ ] only <triangles>, no <tristrips> etc
     - [ ] only <p> element in <triangles>
+  - write math code
+    - [X] matrix*matrix
+    - [X] matrix*vec
+    - [X] matrix transpose
+    - [X] matrix inverse
+    - [ ] transform_pos (w=1)
+    - [ ] transform_normal (w=0)

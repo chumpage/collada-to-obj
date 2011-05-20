@@ -1,6 +1,8 @@
 #!/usr/bin/ruby
 require 'rexml/document'
 
+$epsilon = 1e-6
+
 class ColladaError < StandardError  
 end
 
@@ -12,12 +14,12 @@ def to_float(str)
   Float(str) rescue raise ColladaError.new("#{str} isn't a valid float")
 end
 
-def partition_array(array, sub_array_length, stride)
+def partition_array(array, sub_array_length, stride=sub_array_length)
   if stride < sub_array_length
-    raise ColladaError.new("partition_array error: stride (#{stride}) < sub_array_length #{sub_array_length}")
+    raise ColladaError.new("partition_array error: stride (#{stride}) < sub_array_length (#{sub_array_length})")
   end
   if array.count % stride != 0
-    raise ColladaError.new("partition_array error: array.count (#{array.count}) % stride #{stride} != 0")
+    raise ColladaError.new("partition_array error: array.count (#{array.count}) % stride (#{stride}) != 0")
   end
   sub_arrays = []
   0.step(array.count-1, stride) do |i|
@@ -36,6 +38,121 @@ end
 
 def read_float_array(elem)
   read_numeric_array(elem, :to_float)
+end
+
+def new_matrix(rows, cols, vals=nil)
+  if vals != nil and vals.count != rows*cols
+    raise
+  end
+  if vals != nil
+    partition_array(vals, cols)
+  else
+    partition_array(Array.new(rows*cols, 0), cols)
+  end
+end
+
+def identity_matrix(n)
+  m = new_matrix(n, n)
+  0.upto(n-1) { |i| m[i][i] = 1 }
+  m
+end
+
+def matrix_dimensions(m)
+  [m.count, m[0].count]
+end
+
+def matrix_element_count(m)
+  rows, cols = matrix_dimensions(m)
+  rows*cols
+end
+
+def matrix_mult(a, b)
+  a_rows, a_cols = matrix_dimensions(a)
+  b_rows, b_cols = matrix_dimensions(b)
+  if a_cols != b_rows
+    raise ColladaError.new("matrix_mult error: cols/rows mismatch")
+  end
+  c = new_matrix(a_rows, b_cols)
+  0.upto(a_rows-1) do |i|
+    0.upto(b_cols-1) do |j|
+      c[i][j] = 0
+      0.upto(a_cols-1) { |k| c[i][j] += a[i][k]*b[k][j] }
+    end
+  end
+  c
+end
+
+def matrix_mult_vec(m, v)
+  matrix_mult(m, partition_array(v, 1)).flatten()
+end
+
+def matrix_mult_scalar(m, s)
+  mnew = m.flatten()
+  (0...mnew.count).each do |i| mnew[i] = s*mnew[i] end
+  partition_array(mnew, matrix_dimensions(m)[1])
+end
+
+def matrix_transpose(m)
+  rows, cols = matrix_dimensions(m)
+  trans = new_matrix(cols, rows)
+  rows, cols = matrix_dimensions(trans)
+  0.upto(rows-1) do |i|
+    0.upto(cols-1) do |j|
+      trans[i][j] = m[j][i]
+    end
+  end
+  trans
+end
+
+# the minor matrix is the sub-matrix formed by deleting the specified row and column
+def minor_matrix(m, row, col)
+  m_flat = m.flatten()
+  rows, cols = matrix_dimensions(m)
+  raise if rows != cols
+  minor = []
+  0.upto(rows-1) do |i|
+    0.upto(cols-1) do |j|
+      if i != row and j != col
+        minor << m[i][j]
+      end
+    end
+  end
+  partition_array(minor, cols-1)
+end
+
+def matrix_determinant(m)
+  rows, cols = matrix_dimensions(m)
+  raise if rows != cols
+  if rows == 1
+    return m[0][0]
+  end
+  # cofactor expansion along the top row
+  cofactor_accumulator = 0
+  0.upto(cols-1) do |i|
+    cofactor_accumulator += ((-1)**i)*m[0][i]*(matrix_determinant(minor_matrix(m, 0, i)))
+  end
+  cofactor_accumulator
+end
+
+# the adjugate matrix is the transpose of the matrix of cofactors
+def adjugate_matrix(m)
+  rows, cols = matrix_dimensions(m)
+  raise if rows != cols
+  cofactor_matrix = new_matrix(rows, cols)
+  0.upto(rows-1) do |i|
+    0.upto(cols-1) do |j|
+      cofactor_matrix[i][j] = ((-1)**(i+j))*matrix_determinant(minor_matrix(m, i, j))
+    end
+  end
+  matrix_transpose(cofactor_matrix)
+end
+
+def matrix_inverse(m)
+  det = matrix_determinant(m)
+  if det.abs() < $epsilon
+    raise ColladaError.new("found a non-invertible matrix")
+  end
+  matrix_mult_scalar(adjugate_matrix(m), Float(1)/det)
 end
 
 class Node
@@ -334,7 +451,7 @@ def read_triangles(triangles_elem, id_elem_hash)
   index_stride = get_triangles_index_stride(triangles_elem)
   p_elem = get_child_elem(triangles_elem, 'p')
 
-  indices = partition_array(read_int_array(p_elem), index_stride, index_stride)
+  indices = partition_array(read_int_array(p_elem), index_stride)
   indices = indices.map { |non_unified_index| sort_non_unified_index(non_unified_index, inputs) }
   indices, vertices = convert_to_unified_indices(indices, positions, normals, texcoords)
 
