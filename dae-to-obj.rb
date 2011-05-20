@@ -233,7 +233,7 @@ def read_matrix(matrix_elem)
   if array.count != 16
     raise ColladaError.new("incorrectly formatted <matrix> element")
   end
-  [array[0...4], array[4...8], array[8...12], array[12...16]]
+  partition_array(array, 4)
 end
 
 def read_node(node_elem)

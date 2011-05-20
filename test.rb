@@ -118,7 +118,7 @@ class TestDaeToObj < Test::Unit::TestCase
   TEST_XML
 
   def test_read_matrix
-    assert_equal([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]], read_matrix(get_root(@@matrix_xml_1)))
+    assert_equal(identity_matrix(4), read_matrix(get_root(@@matrix_xml_1)))
     assert_raise(ColladaError) { read_matrix(get_root(@@matrix_xml_2)) }
     assert_raise(ColladaError) { read_matrix(get_root(@@matrix_xml_3)) }
     assert_raise(ColladaError) { read_matrix(get_root(@@matrix_xml_4)) }
