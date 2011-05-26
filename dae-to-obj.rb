@@ -64,26 +64,10 @@ def nested_array_equal(a1, a2, epsilon=$epsilon)
   true
 end
 
-# XXX remove
-# def vector_equal(v1, v2)
-#   if v1.count != v2.count
-#     false
-#   else
-#     (0...v1.count).each do |i|
-#       if (v1[i]-v2[i]).abs >= $epsilon
-#         return false
-#       end
-#     end
-#     true
-#   end
-# end
-
-# XXX needs test
 def vector_length(v)
   Math.sqrt(v.map { |val| val*val }.reduce(:+))
 end
 
-# XXX needs test
 def vector_normalize(v)
   len = vector_length(v)
   if len < $epsilon
@@ -92,7 +76,6 @@ def vector_normalize(v)
   v.map { |val| val /= len }
 end
 
-# XXX needs test
 def vector_cross(a, b)
   ax, ay, az = a
   bx, by, bz = b
@@ -228,18 +211,15 @@ def matrix_inverse(m)
   matrix_mult_scalar(adjugate_matrix(m), Float(1)/det)
 end
 
-# XXX needs test
 def matrix_33_to_44(m)
   m = m.flatten
   new_matrix(4, 4, [m[0],m[1],m[2],0, m[3],m[4],m[5],0, m[6],m[7],m[8],0, 0,0,0,1])
 end
 
-# XXX needs test
 def translation_matrix(tx, ty, tz)
   new_matrix(4, 4, [1,0,0,tx, 0,1,0,ty, 0,0,1,tz, 0,0,0,1])
 end
 
-# XXX needs test
 # rotate r radians around the vector v
 def rotation_matrix(r, v)
   v = vector_normalize(v)
@@ -252,27 +232,22 @@ def rotation_matrix(r, v)
                                            0,                        0,                        0, 1 ])
 end
 
-# XXX needs test
 def x_rotation_matrix(r)
   rotation_matrix(r, [1,0,0])
 end
 
-# XXX needs test
 def y_rotation_matrix(r)
   rotation_matrix(r, [0,1,0])
 end
 
-# XXX needs test
 def z_rotation_matrix(r)
   rotation_matrix(r, [0,0,1])
 end
 
-# XXX needs test
 def scale_matrix(sx, sy, sz)
   new_matrix(4, 4, [sx,0,0,0, 0,sy,0,0, 0,0,sz,0, 0,0,0,1])
 end
 
-# XXX needs test
 def uniform_scale_matrix(s)
   scale_matrix(s, s, s)
 end
@@ -409,24 +384,6 @@ class Mesh
   end
 
   def ==(mesh)
-    # XXX remove
-    # if @vertices.count != mesh.vertices.count
-    #   return false
-    # end
-
-    # (0...@vertices.count).each do |vertex_index|
-    #   v1 = @vertices[vertex_index]
-    #   v2 = mesh.vertices[vertex_index]
-    #   if v1.count != v2.count
-    #     return false
-    #   end
-    #   (0...v1.count).each do |i|
-    #     if not vertex_equal(v1[i], v2[i])
-    #       return false
-    #     end
-    #   end
-    # end
-
     @vertex_format == mesh.vertex_format and
       nested_array_equal(@vertices, mesh.vertices) and
       @indices == mesh.indices
@@ -637,7 +594,6 @@ def transform_normal(transform, n)
   vector_normalize(matrix_mult_vec(transform, [n[0], n[1], n[2], 0])[0..2])
 end
 
-# XXX needs test
 def pretransform_mesh(mesh, transform)
   new_mesh = mesh.clone
   has_normals = vertex_format_has_normals(mesh.vertex_format)

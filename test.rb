@@ -357,23 +357,6 @@ class TestDaeToObj < Test::Unit::TestCase
                  read_triangles(triangles_elem, id_elem_hash))
   end
 
-  # XXX remove
-  # def test_transform
-  #   v = [1,2,3]
-  #   translation = translation_matrix(3, 4, 5)
-  #   assert_vector_equal([4,6,8], transform_pos(translation, [1,2,3]))
-  #   assert_vector_equal([0,0,1], transform_normal(translation, [0,0,1]))
-  #   transform = matrix_mult(
-  #   transform = new_matrix(4, 4, [1,3,2,10, 3,1,2,20, 2,1,3,30, 3,2,1,1])
-  #   transpose_inv_transform = matrix_transpose(matrix_inverse(transform))
-  #   assert_vector_equal([23.0/11,31.0/11,43.0/11], transform_pos(transform, v))
-  #   expected_transformed_normal = [-2.625,-9.875,7.250,6.250]
-  #   transformed_normal = transform_normal(transpose_inv_transform, v)
-  #   (0...4).each do |i|
-  #     assert_in_delta(expected_transformed_normal[i], transformed_normal[i], $epsilon)
-  #   end
-  # end
-
   def test_pretransform_mesh
     indices = [0,1,2, 0,1,2]
     vertices = [[[0,1,2], [1,1,1],    [20,20]],
@@ -381,24 +364,9 @@ class TestDaeToObj < Test::Unit::TestCase
                 [[2,3,4], [0,1,0],    [21,21]]]
     mesh = Mesh.new(vertices, indices, :pos_norm_tex)
 
-    # XXX remove
-    # puts "translation_matrix(3,4,5) = #{translation_matrix(3,4,5).flatten}"
-    # puts "scale_matrix(1,2,3), = #{scale_matrix(1,2,3).flatten}"
-    # puts "x_rotation_matrix(Math::PI) = #{x_rotation_matrix(Math::PI).flatten}"
-    # puts "vector_normalize([1, -0.5, -0.33]) = #{vector_normalize([1, -0.5, -0.33])}"
-    # puts "vector_normalize([-1, 0.5, 0.33]) = #{vector_normalize([-1, 0.5, 0.33])}"
-    # puts "vector_normalize([0, -0.5, 0]) = #{vector_normalize([0, -0.5, 0])}"
-    # puts "vector_length 1 = #{vector_length([0.8578399164447491, -0.42891995822237455, -0.28308717242676723])}"
-    # puts "vector_length 2 = #{vector_length([0.8571428571428571, -0.42857142857142866, -0.28571428571428564])}"
-
     transform = matrix_mult(translation_matrix(3,4,5),
                             scale_matrix(1,2,3),
                             x_rotation_matrix(Math::PI))
-
-    # XXX remove
-    # puts "pos_trans = #{transform.flatten}"
-    # normal_transform = matrix_transpose(matrix_inverse(transform))
-    # puts "normal_transform = #{normal_transform.flatten}"
 
     normals_expected = [[0.8578399164447491,-0.42891995822237455,-0.28308717242676723],
                         [-0.8578399164447491, 0.42891995822237455, 0.28308717242676723],
