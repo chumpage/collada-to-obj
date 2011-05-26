@@ -16,5 +16,5 @@
     - [X] matrix*vec
     - [X] matrix transpose
     - [X] matrix inverse
-    - [ ] transform_pos (w=1)
-    - [ ] transform_normal (w=0)
+    - [X] transform_pos (w=1)
+    - [X] transform_normal (w=0)

@@ -40,6 +40,65 @@ def read_float_array(elem)
   read_numeric_array(elem, :to_float)
 end
 
+def nested_array_equal(a1, a2, epsilon=$epsilon)
+  # base case: compare two numbers
+  if a1.kind_of?(Numeric) or a2.kind_of?(Numeric)
+    if not (a1.kind_of?(Numeric) and a2.kind_of?(Numeric))
+      return false
+    else
+      return (a1-a2).abs < epsilon
+    end
+  end
+
+  # array (recursive) case: compare array counts, then compare each element
+  if a1.count != a2.count
+    return false
+  end
+
+  (0...a1.count).each do |i|
+    if not nested_array_equal(a1[i], a2[i], epsilon)
+      return false
+    end
+  end
+
+  true
+end
+
+# XXX remove
+# def vector_equal(v1, v2)
+#   if v1.count != v2.count
+#     false
+#   else
+#     (0...v1.count).each do |i|
+#       if (v1[i]-v2[i]).abs >= $epsilon
+#         return false
+#       end
+#     end
+#     true
+#   end
+# end
+
+# XXX needs test
+def vector_length(v)
+  Math.sqrt(v.map { |val| val*val }.reduce(:+))
+end
+
+# XXX needs test
+def vector_normalize(v)
+  len = vector_length(v)
+  if len < $epsilon
+    raise ColladaError.new("can't normalize 0-length vector")
+  end
+  v.map { |val| val /= len }
+end
+
+# XXX needs test
+def vector_cross(a, b)
+  ax, ay, az = a
+  bx, by, bz = b
+  [ay*bz-az*by, az*bx-ax*bz, ax*by-ay*bx]
+end
+
 def new_matrix(rows, cols, vals=nil)
   if vals != nil and vals.count != rows*cols
     raise
@@ -66,11 +125,11 @@ def matrix_element_count(m)
   rows*cols
 end
 
-def matrix_mult(a, b)
+def matrix_mult_2(a, b)
   a_rows, a_cols = matrix_dimensions(a)
   b_rows, b_cols = matrix_dimensions(b)
   if a_cols != b_rows
-    raise ColladaError.new("matrix_mult error: cols/rows mismatch")
+    raise ColladaError.new("matrix_mult_2 error: cols/rows mismatch")
   end
   c = new_matrix(a_rows, b_cols)
   0.upto(a_rows-1) do |i|
@@ -82,8 +141,22 @@ def matrix_mult(a, b)
   c
 end
 
+def matrix_mult(*matrices)
+  if matrices.count == 0
+    raise ColladaError.new("can't do matrix multiplication with 0 matrices")
+  elsif matrices.count == 1
+    matrices[0].clone
+  else
+    result = matrices[0]
+    (1...matrices.count).each do |i|
+      result = matrix_mult_2(result, matrices[i])
+    end
+    result
+  end
+end
+
 def matrix_mult_vec(m, v)
-  matrix_mult(m, partition_array(v, 1)).flatten()
+  matrix_mult(m, matrix_transpose([v])).flatten()
 end
 
 def matrix_mult_scalar(m, s)
@@ -155,21 +228,70 @@ def matrix_inverse(m)
   matrix_mult_scalar(adjugate_matrix(m), Float(1)/det)
 end
 
+# XXX needs test
+def matrix_33_to_44(m)
+  m = m.flatten
+  new_matrix(4, 4, [m[0],m[1],m[2],0, m[3],m[4],m[5],0, m[6],m[7],m[8],0, 0,0,0,1])
+end
+
+# XXX needs test
+def translation_matrix(tx, ty, tz)
+  new_matrix(4, 4, [1,0,0,tx, 0,1,0,ty, 0,0,1,tz, 0,0,0,1])
+end
+
+# XXX needs test
+# rotate r radians around the vector v
+def rotation_matrix(r, v)
+  v = vector_normalize(v)
+  cosr = Math.cos(r)
+  sinr = Math.sin(r)
+  vx, vy, vz = v
+  new_matrix(4, 4, [   cosr + (1-cosr)*vx*vx, (1-cosr)*vx*vy - vz*sinr, (1-cosr)*vx*vz + vy*sinr, 0,
+                    (1-cosr)*vx*vy + vz*sinr,    cosr + (1-cosr)*vy*vy, (1-cosr)*vy*vz - vx*sinr, 0,
+                    (1-cosr)*vx*vz - vy*sinr, (1-cosr)*vy*vz + vx*sinr,    cosr + (1-cosr)*vz*vz, 0,
+                                           0,                        0,                        0, 1 ])
+end
+
+# XXX needs test
+def x_rotation_matrix(r)
+  rotation_matrix(r, [1,0,0])
+end
+
+# XXX needs test
+def y_rotation_matrix(r)
+  rotation_matrix(r, [0,1,0])
+end
+
+# XXX needs test
+def z_rotation_matrix(r)
+  rotation_matrix(r, [0,0,1])
+end
+
+# XXX needs test
+def scale_matrix(sx, sy, sz)
+  new_matrix(4, 4, [sx,0,0,0, 0,sy,0,0, 0,0,sz,0, 0,0,0,1])
+end
+
+# XXX needs test
+def uniform_scale_matrix(s)
+  scale_matrix(s, s, s)
+end
+
 class Node
-  attr_accessor :id, :transform, :child_nodes, :instance_nodes, :instance_geoms
+  attr_accessor :id, :transform, :child_node_elems, :instance_nodes, :instance_geoms
 
   def initialize
-    @id = ""
-    @transform = nil
-    @child_nodes = []
-    @instance_nodes = []
-    @instance_geoms = []
+    @id = nil
+    @transform = nil # matrix transform, of nil if no transform
+    @child_node_elems = [] # Element array
+    @instance_nodes = [] # string array
+    @instance_geoms = [] # string array
   end
 
   def ==(node)
     @id == node.id and
       @transform == node.transform and
-      @child_nodes == node.child_nodes and
+      @child_node_elems == node.child_node_elems and
       @instance_nodes == node.instance_nodes and
       @instance_geoms == node.instance_geoms
   end
@@ -238,26 +360,20 @@ end
 
 def read_node(node_elem)
   node = Node.new
-  id = node_elem.attributes['id']
-  if id != nil
-    node.id = id
-  end
-  node_elem.elements.each('node') do |child_node_elem|
-    node.child_nodes << read_node(child_node_elem)
-  end
+  node.id = node_elem.attributes['id']
+  node.child_node_elems = node_elem.get_elements('node')
   node_elem.elements.each('instance_node') do |instance_node_elem|
-    url = read_url(instance_node_elem, 'url')
-    node.instance_nodes << url if url != nil
+    node.instance_nodes << read_url(instance_node_elem, 'url')
   end
   node_elem.elements.each('instance_geometry') do |instance_geom_elem|
-    url = read_url(instance_geom_elem, 'url')
-    node.instance_geoms << url if url != nil
+    node.instance_geoms << read_url(instance_geom_elem, 'url')
   end
   if node_elem.get_elements('matrix').count > 1
     raise ColladaError.new("more than one <matrix> element in a node. unsupported for now.")
   end
-  matrix_elem = node_elem.elements['matrix']
-  node.transform = read_matrix(matrix_elem) if matrix_elem != nil
+  if node_elem.elements['matrix']
+    node.transform = read_matrix(node_elem.elements['matrix'])
+  end
   node
 end
 
@@ -286,9 +402,33 @@ class Mesh
     @vertex_format = vertex_format
   end
 
+  def initialize_copy(source)
+    super
+    @vertices = source.vertices.clone
+    @indices = source.indices.clone
+  end
+
   def ==(mesh)
+    # XXX remove
+    # if @vertices.count != mesh.vertices.count
+    #   return false
+    # end
+
+    # (0...@vertices.count).each do |vertex_index|
+    #   v1 = @vertices[vertex_index]
+    #   v2 = mesh.vertices[vertex_index]
+    #   if v1.count != v2.count
+    #     return false
+    #   end
+    #   (0...v1.count).each do |i|
+    #     if not vertex_equal(v1[i], v2[i])
+    #       return false
+    #     end
+    #   end
+    # end
+
     @vertex_format == mesh.vertex_format and
-      @vertices == mesh.vertices and
+      nested_array_equal(@vertices, mesh.vertices) and
       @indices == mesh.indices
   end
 end
@@ -304,6 +444,25 @@ def get_vertex_format(has_normals, has_texcoords)
   when [true, true]
     :pos_norm_tex
   end
+end
+
+def vertex_format_has_normals(vertex_format)
+  vertex_format == :pos_norm  or  vertex_format == :pos_norm_tex
+end
+
+# XXX needs test
+def vertex_format_has_tex_coords(vertex_format)
+  vertex_format == :pos_tex  or  vertex_format == :pos_norm_tex
+end
+
+# returns an array containing the indices of each of the pos/normal/tex coord in a
+# vertex, or nil if a component isn't present
+# XXX needs test
+def vertex_format_indices(vertex_format)
+  p = 0
+  n = vertex_format_has_normals(vertex_format) ? 1 : nil
+  t = vertex_format_has_tex_coords(vertex_format) ? (n ? 2 : 1) : nil
+  [p, n, t]
 end
 
 # returns a hash
@@ -468,10 +627,127 @@ def read_geometry(geom_elem, id_elem_hash)
   meshes
 end
 
+def transform_pos(transform, p)
+  pnew = matrix_mult_vec(transform, [p[0], p[1], p[2], 1])
+  pnew = pnew.map { |val| val /= pnew[3] }
+  pnew[0..2]
+end
+
+def transform_normal(transform, n)
+  vector_normalize(matrix_mult_vec(transform, [n[0], n[1], n[2], 0])[0..2])
+end
+
+# XXX needs test
+def pretransform_mesh(mesh, transform)
+  new_mesh = mesh.clone
+  has_normals = vertex_format_has_normals(mesh.vertex_format)
+  normal_transform = matrix_transpose(matrix_inverse(transform))
+  (0...mesh.vertices.count).each do |i|
+    new_mesh.vertices[i][0] = transform_pos(transform, new_mesh.vertices[i][0])
+    if has_normals
+      new_mesh.vertices[i][1] = transform_normal(normal_transform, new_mesh.vertices[i][1])
+    end
+  end
+  new_mesh
+end
+
+# XXX needs test
+def traverse_node(node_elem, parent_transform, id_elem_hash)
+  node = read_node(node_elem)
+  transform = node.transform ? matrix_mult(parent_transform, node.transform) : parent_transform
+
+  # read geoms
+  meshes = []
+  node.instance_geoms.each do |geom_id|
+    geom_elem = id_to_elem(geom_id, id_elem_hash)
+    geom_meshes = read_geometry(geom_elem, id_elem_hash)
+    meshes.concat(geom_meshes)
+  end
+
+  # pretransform meshes
+  meshes = meshes.map { |mesh| pretransform_mesh(mesh, transform) }
+
+  child_node_meshes = node.child_node_elems.map do |child_node_elem|
+    traverse_node(child_node_elem, transform, id_elem_hash)
+  end
+
+  instance_node_meshes = node.instance_nodes.map do |node_id|
+    traverse_node(id_to_elem(node_id, id_elem_hash), transform, id_elem_hash)
+  end
+
+  [meshes, child_node_meshes, instance_node_meshes].flatten
+end
+
+# XXX needs test
+# returns a list of Meshes with all positions and normals pre-transformed
+def traverse_scene(doc)
+  id_elem_hash = build_id_elem_hash(doc.root)
+  scene = doc.elements['COLLADA/scene']
+  if scene == nil
+    raise ColladaError.new("couldn't find <scene>")
+  end
+  visual_scene = elem_url_ref_to_elem(get_child_elem(scene, 'instance_visual_scene'), 'url', id_elem_hash)
+  meshes = []
+  visual_scene.elements('node').each do |node_elem|
+    meshes.concat(traverse_node(node_elem, identity_matrix(4), id_elem_hash))
+  end
+  meshes
+end
+
+# XXX needs test
+def to_obj(filename, meshes)
+  print_vertex = lambda do |io, vertex, vertex_format|
+    p_index, n_index, t_index = vertex_format_indices(vertex_format)
+    p = vertex[p_index]
+    io.printf("v %f %f %f\n", p[0], p[1], p[2])
+    if n_index
+      n = vertex_format[n_index]
+      io.printf("vn %f %f %f\n", n[0], n[1], n[2])
+    end
+    if t_index
+      t = vertex_format[t_index]
+      io.printf("vt %f %f\n", t[0], t[1])
+    end
+  end
+
+  print_triangle_indices = lambda do |io, indices, vertex_format, vertex_offset|
+    i0, i1, i2 = indices.map { |i| i + vertex_offset }
+    case vertex_format
+    when :pos
+      io.printf("f %d %d %d\n", i0, i1, i2)
+    when :pos_norm
+      io.printf("f %d//%d %d//%d %d//%d\n", i0, i0, i1, i1, i2, i2)
+    when :pos_tex
+      io.printf("f %d/%d %d/%d %d/%d \n", i0, i0, i1, i1, i2, i2)
+    when :pos_norm_tex
+      io.printf("f %d/%d/%d %d/%d/%d %d/%d/%d \n", i0, i0, i0, i1, i1, i1, i2, i2, i2)
+    else
+      raise ColladaError.new("unknown vertex format")
+    end
+  end
+
+  print_mesh = lambda do |io, mesh, vertex_offset|
+    mesh.vertices.each do |vertex|
+      print_vertex.call(io, vertex, mesh.vertex_format)
+    end
+
+    triangle_indices = partition_array(mesh.indices, 3)
+    triangle_indices.each do |indices|
+      print_triangle_indices.call(io, indices, mesh.vertex_format, vertex_offset)
+    end
+  end
+
+  f = File.open(filename, 'w')
+  total_vertex_count = 0
+  meshes.each do |mesh|
+    print_mesh.call(f, mesh, total_vertex_count)
+    total_vertex_count += mesh.vertices.count
+  end
+end
+
 # main
 if $0 == __FILE__
   # doc = REXML::Document.new(File.open('/st/misc/model.dae'))
-  # id_elem_hash = build_id_elem_hash(doc.root)
-  # scene_nodes = read_nodes(doc.elements['/COLLADA/library_visual_scenes/visual_scene'], id_elem_hash)
-  puts 'kaka'
+  # meshes = traverse_scene(doc)
+  # to_obj('/st/misc/model.obj', meshes)
 end
