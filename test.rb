@@ -50,18 +50,18 @@ def rotation_matrix_alternative(r, v)
 end
 
 class TestDaeToObj < Test::Unit::TestCase
-  def test_to_int
-    assert_equal(3, to_int("3"))
-    assert_raise(ColladaError) { to_int("blah") }
-    assert_raise(ColladaError) { to_int("5 blah") }
-    assert_raise(ColladaError) { to_int("3.2") }
+  def test_str_to_int
+    assert_equal(3, str_to_int("3"))
+    assert_raise(ColladaError) { str_to_int("blah") }
+    assert_raise(ColladaError) { str_to_int("5 blah") }
+    assert_raise(ColladaError) { str_to_int("3.2") }
   end
 
-  def test_to_float
-    assert_equal(3.0, to_float("3.0"))
-    assert_equal(3.0, to_float("3"))
-    assert_raise(ColladaError) { to_float("blah") }
-    assert_raise(ColladaError) { to_float("5 blah") }
+  def test_str_to_float
+    assert_equal(3.0, str_to_float("3.0"))
+    assert_equal(3.0, str_to_float("3"))
+    assert_raise(ColladaError) { str_to_float("blah") }
+    assert_raise(ColladaError) { str_to_float("5 blah") }
   end
 
   def test_partition_array
@@ -288,14 +288,15 @@ class TestDaeToObj < Test::Unit::TestCase
   end
 
   def test_convert_to_unified_indices
-    non_unified_indices = [[0, 0, 0], [0, 1, 0], [1, 1, 1], [0, 1, 0]]
+    non_unified_indices = [[0, 0, 0], [0, 1, 0], [1, 1, 1], [0, 1, 0], [1, 1, 0]]
     positions = [[0, 0, 0], [1, 1, 1]]
     normals = [[10, 10, 10], [11, 11, 11]]
     texcoords = [[20, 20], [21, 21]]
-    unified_indices = [0, 1, 2, 1]
+    unified_indices = [0, 1, 2, 1, 3]
     vertices = [[[0, 0, 0], [10, 10, 10], [20, 20]],
                 [[0, 0, 0], [11, 11, 11], [20, 20]],
-                [[1, 1, 1], [11, 11, 11], [21, 21]]]
+                [[1, 1, 1], [11, 11, 11], [21, 21]],
+                [[1, 1, 1], [11, 11, 11], [20, 20]]]
     assert_equal([unified_indices, vertices],
                  convert_to_unified_indices(non_unified_indices, positions, normals, texcoords))
   end

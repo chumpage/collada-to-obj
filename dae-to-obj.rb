@@ -6,11 +6,14 @@ $epsilon = 1e-6
 class ColladaError < StandardError  
 end
 
-def to_int(str)
+class NormalizeZeroLengthVectorError < ColladaError
+end
+
+def str_to_int(str)
   Integer(str) rescue raise ColladaError.new("#{str} isn't a valid integer")
 end
 
-def to_float(str)
+def str_to_float(str)
   Float(str) rescue raise ColladaError.new("#{str} isn't a valid float")
 end
 
@@ -33,11 +36,11 @@ def read_numeric_array(elem, conversion_fn)
 end
 
 def read_int_array(elem)
-  read_numeric_array(elem, :to_int)
+  read_numeric_array(elem, :str_to_int)
 end
 
 def read_float_array(elem)
-  read_numeric_array(elem, :to_float)
+  read_numeric_array(elem, :str_to_float)
 end
 
 def nested_array_equal(a1, a2, epsilon=$epsilon)
@@ -71,7 +74,7 @@ end
 def vector_normalize(v)
   len = vector_length(v)
   if len < $epsilon
-    raise ColladaError.new("can't normalize 0-length vector")
+    raise NormalizeZeroLengthVectorError.new("can't normalize 0-length vector")
   end
   v.map { |val| val /= len }
 end
@@ -291,7 +294,7 @@ def get_attr_str(elem, attr_name)
 end
 
 def get_attr_int(elem, attr_name)
-  to_int(get_attr_str(elem, attr_name))
+  str_to_int(get_attr_str(elem, attr_name))
 end
 
 def read_url(elem, attr_name)
@@ -433,7 +436,7 @@ def read_triangles_inputs(triangles_elem)
     source = read_url(input_elem, 'source')
     offset = get_attr_int(input_elem, 'offset')
     set_str = input_elem.attributes['set']
-    set = set_str == nil ? 0 : to_int(set_str)
+    set = set_str == nil ? 0 : str_to_int(set_str)
 
     hash_val = {:source => source, :offset => offset}
     inputs[:vertex] = hash_val if semantic.upcase == "VERTEX" and inputs[:vertex] == nil
@@ -461,7 +464,7 @@ def get_triangles_index_stride(triangles_elem)
   triangles_elem.elements.each('input') do |input_elem|
     offset_str = input_elem.attributes['offset']
     if offset_str
-      offset = to_int(offset_str)
+      offset = str_to_int(offset_str)
       max_offset = [max_offset, offset].max
     end
   end
@@ -536,7 +539,7 @@ def convert_to_unified_indices(non_unified_indices, positions, normals, texcoord
     if index_hash[non_unified_index] != nil
       indices << index_hash[non_unified_index]
     else
-      new_index = indices.count
+      new_index = vertices.count
       indices << new_index
       index_hash[non_unified_index] = new_index
       vertex = [positions[non_unified_index[0]]]
@@ -601,7 +604,11 @@ def pretransform_mesh(mesh, transform)
   (0...mesh.vertices.count).each do |i|
     new_mesh.vertices[i][0] = transform_pos(transform, new_mesh.vertices[i][0])
     if has_normals
-      new_mesh.vertices[i][1] = transform_normal(normal_transform, new_mesh.vertices[i][1])
+      begin
+        new_mesh.vertices[i][1] = transform_normal(normal_transform, new_mesh.vertices[i][1])
+      rescue NormalizeZeroLengthVectorError
+        new_mesh.vertices[i][1] = [0, 0, 0]
+      end
     end
   end
   new_mesh
@@ -644,7 +651,7 @@ def traverse_scene(doc)
   end
   visual_scene = elem_url_ref_to_elem(get_child_elem(scene, 'instance_visual_scene'), 'url', id_elem_hash)
   meshes = []
-  visual_scene.elements('node').each do |node_elem|
+  visual_scene.elements.each('node') do |node_elem|
     meshes.concat(traverse_node(node_elem, identity_matrix(4), id_elem_hash))
   end
   meshes
@@ -653,21 +660,32 @@ end
 # XXX needs test
 def to_obj(filename, meshes)
   print_vertex = lambda do |io, vertex, vertex_format|
+    # XXX currently we output dummy texture coordinates and normals for meshes that
+    # don't have those, to keep the absolute-based indexing happy. i should switch to
+    # either relative (-1-based) indexing or non-unified indices, so that i don't have
+    # to output dummy values.
     p_index, n_index, t_index = vertex_format_indices(vertex_format)
     p = vertex[p_index]
     io.printf("v %f %f %f\n", p[0], p[1], p[2])
     if n_index
-      n = vertex_format[n_index]
+      n = vertex[n_index]
       io.printf("vn %f %f %f\n", n[0], n[1], n[2])
+    else
+      io.printf("vn 0 0 0\n")
     end
     if t_index
-      t = vertex_format[t_index]
+      t = vertex[t_index]
       io.printf("vt %f %f\n", t[0], t[1])
+    else
+      io.printf("vt 0 0\n")
     end
   end
 
   print_triangle_indices = lambda do |io, indices, vertex_format, vertex_offset|
-    i0, i1, i2 = indices.map { |i| i + vertex_offset }
+    # obj indices are 1-based, not 0-based, and start at the first vertex in the entire
+    # file, rather than the first vertex of the mesh. we need to adjust the indices for
+    # this.
+    i0, i1, i2 = indices.map { |i| 1 + i + vertex_offset }
     case vertex_format
     when :pos
       io.printf("f %d %d %d\n", i0, i1, i2)
@@ -703,7 +721,7 @@ end
 
 # main
 if $0 == __FILE__
-  # doc = REXML::Document.new(File.open('/st/misc/model.dae'))
-  # meshes = traverse_scene(doc)
-  # to_obj('/st/misc/model.obj', meshes)
+  doc = REXML::Document.new(File.open('/st/misc/dae-to-obj-test/model.dae'))
+  meshes = traverse_scene(doc)
+  to_obj('/st/misc/dae-to-obj-test/model.obj', meshes)
 end
