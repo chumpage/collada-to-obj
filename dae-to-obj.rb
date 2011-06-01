@@ -1,5 +1,6 @@
 #!/usr/bin/ruby
 require 'rexml/document'
+require 'optparse'
 
 $epsilon = 1e-6
 
@@ -208,7 +209,12 @@ end
 
 def matrix_inverse(m)
   det = matrix_determinant(m)
-  if det.abs() < $epsilon
+  # i bumped into an error with the epsilon check where i couldn't invert a .001
+  # uniform scale matrix. obviously the epsilon was too high. maybe i should go back
+  # and set epsilon to a higher value, but for now i'll just change this to check
+  # directly against 0 instead of epsilon
+  #if det.abs() < $epsilon
+  if det.abs() == 0
     raise ColladaError.new("found a non-invertible matrix")
   end
   matrix_mult_scalar(adjugate_matrix(m), Float(1)/det)
@@ -721,7 +727,56 @@ end
 
 # main
 if $0 == __FILE__
-  doc = REXML::Document.new(File.open('/st/misc/dae-to-obj-test/model.dae'))
+  options = {}
+
+  optparse = OptionParser.new do |opts|
+    opts.banner = "Usage: dae-to-obj [options] dae-file obj-file"
+
+    opts.on('-h', '--help', 'print help and exit') do
+      puts opts
+      exit
+    end
+
+    # XXX remove this at some point
+    options[:blender_shrink] = false
+    opts.on('', '--blender-shrink', 'shrink and rotate the model to fit in blender (temporary hack)') do
+      options[:blender_shrink] = true
+    end
+  end
+
+  optparse.parse!
+
+  if ARGV.empty?
+    puts "missing .dae file to convert"
+    exit
+  end
+
+  input_file = ARGV[0]
+  if not File.exists?(input_file)
+    puts "file '#{input_file}' doesn't exist"
+    exit
+  end
+
+  output_file = File.basename(input_file, '.*') + '.obj'
+  if ARGV.count > 1
+    output_file = ARGV[1]
+  end
+
+  # XXX why does File.writable? return false for files I can in fact write to? we'll
+  # disable this check for now.
+  # if not File.writable?(output_file)
+  #   puts "file '#{output_file}' is not writable"
+  #   exit
+  # end
+
+  doc = REXML::Document.new(File.open(input_file))
   meshes = traverse_scene(doc)
-  to_obj('/st/misc/dae-to-obj-test/model.obj', meshes)
+
+  if options[:blender_shrink]
+    # apply a scale and rotation to make the model easier to view in blender
+    transform = matrix_mult(x_rotation_matrix(-Math::PI/2), uniform_scale_matrix(0.001))
+    meshes = meshes.map { |mesh| pretransform_mesh(mesh, transform) }
+  end
+
+  to_obj(output_file, meshes)
 end
