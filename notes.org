@@ -2,6 +2,7 @@
   - [ ] add material/texture support
   - [ ] add output to a custom, but ultra-simple, format
   - [ ] read kmz files directly
+  - [ ] return -1 on error
   - command line interface
     - [X] input file name, output file name
     - [ ] hack to make a model look reasonable in blender (shrink, rotate)

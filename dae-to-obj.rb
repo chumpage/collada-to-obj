@@ -1,6 +1,8 @@
 #!/usr/bin/ruby
 require 'rexml/document'
 require 'optparse'
+require 'stringio'
+require 'zip/zip' # XXX i don't want to actually require this
 
 $epsilon = 1e-6
 
@@ -725,6 +727,31 @@ def to_obj(filename, meshes)
   end
 end
 
+# XXX needs test
+def path_suffix(path)
+  index = path.index('.')
+  if index == nil
+    ""
+  else
+    path[index..-1]
+  end
+end
+
+# XXX needs test
+def path_basename(path)
+  File.basename(path, path_suffix(path))
+end
+
+# XXX needs test
+def capture_stdout_stderr
+  orig_stdout, orig_stderr = $stdout, $stderr
+  $stdout, $stderr = StringIO.new, StringIO.new
+  yield
+  [$stdout.string, $stderr.string]
+ensure
+  $stdout, $stderr = orig_stdout, orig_stderr
+end
+
 # main
 if $0 == __FILE__
   options = {}
@@ -751,13 +778,40 @@ if $0 == __FILE__
     exit
   end
 
+  input_io = nil
+
   input_file = ARGV[0]
   if not File.exists?(input_file)
     puts "file '#{input_file}' doesn't exist"
     exit
   end
 
-  output_file = File.basename(input_file, '.*') + '.obj'
+  if path_suffix(input_file) == '.kmz'
+    model_file_name = 'models/model.dae'
+    found_model = false
+    zip = nil
+
+    # i'm seeing a ton of goofy "Invalid date/time in zip entry" messages going
+    # directly to stdout from ZipFile (very annoying) on the test files i'm
+    # using. let's temporarily capture stdout and stderr while opening the zip file.
+    capture_stdout_stderr do
+      zip = Zip::ZipFile.open(input_file)
+      found_model = zip.find_entry(model_file_name)
+    end
+
+    if not found_model
+      puts "couldn't find the #{model_file_name} file in #{input_file}"
+      exit
+    end
+
+    capture_stdout_stderr do
+      input_io = StringIO.new(zip.read(model_file_name))
+    end
+  else
+    input_io = File.open(input_file)
+  end
+
+  output_file = path_basename(input_file) + '.obj'
   if ARGV.count > 1
     output_file = ARGV[1]
   end
@@ -769,7 +823,7 @@ if $0 == __FILE__
   #   exit
   # end
 
-  doc = REXML::Document.new(File.open(input_file))
+  doc = REXML::Document.new(input_io)
   meshes = traverse_scene(doc)
 
   if options[:blender_shrink]
