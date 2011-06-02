@@ -2,7 +2,13 @@
 require 'rexml/document'
 require 'optparse'
 require 'stringio'
-require 'zip/zip' # XXX i don't want to actually require this
+
+$have_zip = true
+begin
+  require 'zip/zip'
+rescue LoadError
+  $have_zip = false
+end
 
 $epsilon = 1e-6
 
@@ -787,6 +793,11 @@ if $0 == __FILE__
   end
 
   if path_suffix(input_file) == '.kmz'
+    if !$have_zip
+      puts "attempting to read a .kmz, but missing the 'zip' gem. install the 'zip' gem and try again."
+      exit
+    end
+
     model_file_name = 'models/model.dae'
     found_model = false
     zip = nil
