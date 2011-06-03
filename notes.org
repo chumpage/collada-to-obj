@@ -1,16 +1,19 @@
 - todo
   - [ ] add material/texture support
   - [ ] add output to a custom, but ultra-simple, format
-  - [ ] read kmz files directly
+  - [X] read kmz files directly
   - [ ] return -1 on error
+  - [ ] figure out how to handle double-sided flag
   - command line interface
     - [X] input file name, output file name
-    - [ ] hack to make a model look reasonable in blender (shrink, rotate)
+    - [X] hack to make a model look reasonable in blender (shrink, rotate)
   - add checks for the following
     - [ ] no transforms other than <matrix>
     - [ ] only <triangles>, no <tristrips> etc
     - [ ] only <p> element in <triangles>
-  - performance improvement: cache read results
+    - [ ] only one set of texture coordinates used
+  - [ ] support effect types other than <lambert>
+  - [ ] performance improvement: cache read results
 
 
 - todo archive
