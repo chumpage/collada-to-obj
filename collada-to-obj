@@ -763,7 +763,7 @@ if $0 == __FILE__
   options = {}
 
   optparse = OptionParser.new do |opts|
-    opts.banner = "Usage: dae-to-obj [options] dae-file obj-file"
+    opts.banner = "Usage: collada-to-obj [options] collada-file obj-file"
 
     opts.on('-h', '--help', 'print help and exit') do
       puts opts
