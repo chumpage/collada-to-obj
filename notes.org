@@ -1,22 +1,39 @@
 - todo
-  - [ ] add material/texture support
+  - material/texture support
+    - [ ] create a default Material and use it on each Mesh that doesn't have a material
+    - [ ] use the Material ID for the name in the obj output, and instance the materials properly
+    - [ ] support effect types other than <lambert>
   - [ ] add output to a custom, but ultra-simple, format
-  - [X] read kmz files directly
   - [ ] return -1 on error
   - [ ] figure out how to handle double-sided flag
-  - command line interface
-    - [X] input file name, output file name
-    - [X] hack to make a model look reasonable in blender (shrink, rotate)
   - add checks for the following
     - [ ] no transforms other than <matrix>
     - [ ] only <triangles>, no <tristrips> etc
     - [ ] only <p> element in <triangles>
     - [ ] only one set of texture coordinates used
-  - [ ] support effect types other than <lambert>
   - [ ] performance improvement: cache read results
+  - write more unit tests
+    - vertex_format_has_tex_coords, vertex_format_indices, traverse_node,
+      traverse_scene, to_obj, to_mtl, path_*, capture_stdout_stderr, InstanceGeom,
+      verify_attr_val, Material, find_sid_match, read_texture, read_color,
+      read_material_property, uniquify_material_name, read_material,
+      read_bind_material, get_material_list, get_image_path, ZipCopier, DiskCopier,
+      fix_material_image_references, copy_images
 
 
 - todo archive
+  - [X] read kmz files directly
+  - command line interface
+    - [X] input file name, output file name
+    - [X] hack to make a model look reasonable in blender (shrink, rotate)
+  - material/texture support
+    - [X] read <material>, return Material instance
+    - [X] read <bind_material>, return hash of material symbol to id
+    - [X] pass hash from reading <bind_material> to read_geometry
+    - [X] add Material ref to each Mesh, assign in read_geometry
+    - [X] output a .mtl file, reference it in the .obj
+    - [X] create a dir for the output .obj, .mtl
+    - [X] copy all textures to the output dir
   - [X] add some unit tests
   - [X] finish code to read <source> elements
   - [X] write code to convert to unified indices

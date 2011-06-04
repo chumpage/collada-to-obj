@@ -2,6 +2,9 @@
 require 'rexml/document'
 require 'optparse'
 require 'stringio'
+require 'set'
+require 'fileutils'
+require 'pathname'
 
 $have_zip = true
 begin
@@ -269,6 +272,19 @@ def uniform_scale_matrix(s)
   scale_matrix(s, s, s)
 end
 
+class InstanceGeom
+  attr_accessor :id, :material_symbol_hash
+
+  def initialize(id, material_symbol_hash = {})
+    @id = id
+    @material_symbol_hash = material_symbol_hash
+  end
+
+  def ==(instance_geom)
+    @id == instance_geom.id  and  @material_symbol_hash == instance_geom.material_symbol_hash
+  end
+end
+
 class Node
   attr_accessor :id, :transform, :child_node_elems, :instance_nodes, :instance_geoms
 
@@ -277,7 +293,7 @@ class Node
     @transform = nil # matrix transform, of nil if no transform
     @child_node_elems = [] # Element array
     @instance_nodes = [] # string array
-    @instance_geoms = [] # string array
+    @instance_geoms = [] # InstanceGeom array
   end
 
   def ==(node)
@@ -309,6 +325,13 @@ end
 
 def get_attr_int(elem, attr_name)
   str_to_int(get_attr_str(elem, attr_name))
+end
+
+def verify_attr_val(elem, attr_name, expected_attr_val)
+  actual_attr_val = get_attr_str(elem, attr_name)
+  if actual_attr_val != expected_attr_val
+    raise ColladaError.new("in <#{elem.name}>, expected #{attr_name}=#{expected_attr_val}, got #{attr_name}=#{actual_attr_val}")
+  end
 end
 
 def read_url(elem, attr_name)
@@ -358,7 +381,12 @@ def read_node(node_elem)
     node.instance_nodes << read_url(instance_node_elem, 'url')
   end
   node_elem.elements.each('instance_geometry') do |instance_geom_elem|
-    node.instance_geoms << read_url(instance_geom_elem, 'url')
+    instance_geom = InstanceGeom.new(read_url(instance_geom_elem, 'url'))
+    bind_material_elem = instance_geom_elem.elements['bind_material']
+    if bind_material_elem
+      instance_geom.material_symbol_hash = read_bind_material(bind_material_elem)
+    end
+    node.instance_geoms << instance_geom
   end
   if node_elem.get_elements('matrix').count > 1
     raise ColladaError.new("more than one <matrix> element in a node. unsupported for now.")
@@ -386,24 +414,29 @@ class Mesh
   #   - :pos_tex
   #   - :pos_norm_tex
 
-  attr_accessor :vertex_format, :vertices, :indices
+  attr_accessor :vertex_format, :vertices, :indices, :material
 
-  def initialize(vertices, indices, vertex_format)
+  def initialize(vertices, indices, vertex_format, material=nil)
     @vertices = vertices
     @indices = indices
     @vertex_format = vertex_format
+    @material = material
   end
 
   def initialize_copy(source)
     super
     @vertices = source.vertices.clone
     @indices = source.indices.clone
+    if source.material
+      @material = source.material.clone
+    end
   end
 
   def ==(mesh)
     @vertex_format == mesh.vertex_format and
       nested_array_equal(@vertices, mesh.vertices) and
-      @indices == mesh.indices
+      @indices == mesh.indices and
+      @material == mesh.material
   end
 end
 
@@ -424,14 +457,12 @@ def vertex_format_has_normals(vertex_format)
   vertex_format == :pos_norm  or  vertex_format == :pos_norm_tex
 end
 
-# XXX needs test
 def vertex_format_has_tex_coords(vertex_format)
   vertex_format == :pos_tex  or  vertex_format == :pos_norm_tex
 end
 
 # returns an array containing the indices of each of the pos/normal/tex coord in a
 # vertex, or nil if a component isn't present
-# XXX needs test
 def vertex_format_indices(vertex_format)
   p = 0
   n = vertex_format_has_normals(vertex_format) ? 1 : nil
@@ -571,7 +602,7 @@ def convert_to_unified_indices(non_unified_indices, positions, normals, texcoord
 end
 
 # returns a Mesh
-def read_triangles(triangles_elem, id_elem_hash)
+def read_triangles(triangles_elem, id_elem_hash, material_symbol_hash, material_count_hash)
   inputs = read_triangles_inputs(triangles_elem)
   position_source = get_vertices_position_source(inputs[:vertex][:source], id_elem_hash)
   inputs[:position] = inputs[:vertex].clone
@@ -588,15 +619,26 @@ def read_triangles(triangles_elem, id_elem_hash)
   indices = indices.map { |non_unified_index| sort_non_unified_index(non_unified_index, inputs) }
   indices, vertices = convert_to_unified_indices(indices, positions, normals, texcoords)
 
-  Mesh.new(vertices, indices, get_vertex_format(!!normals, !!texcoords))
+  material = nil
+  material_symbol = triangles_elem.attributes['material']
+  if material_symbol
+    material_id = material_symbol_hash[material_symbol]
+    if !material_id
+      raise ColladaError.new("in <triangles>, found material=#{material_symbol}, but couldn't find matching <instance_material> in <bind_material>")
+    end
+    material_elem = id_to_elem(material_id, id_elem_hash)
+    material = read_material(material_elem, id_elem_hash, material_count_hash)
+  end
+
+  Mesh.new(vertices, indices, get_vertex_format(!!normals, !!texcoords), material)
 end
 
 # returns a Mesh array
-def read_geometry(geom_elem, id_elem_hash)
+def read_geometry(geom_elem, id_elem_hash, material_symbol_hash, material_count_hash)
   mesh_elem = get_child_elem(geom_elem, 'mesh')
   meshes = []
   mesh_elem.elements.each('triangles') do |triangles_elem|
-    meshes << read_triangles(triangles_elem, id_elem_hash)
+    meshes << read_triangles(triangles_elem, id_elem_hash, material_symbol_hash, material_count_hash)
   end
   meshes
 end
@@ -628,16 +670,205 @@ def pretransform_mesh(mesh, transform)
   new_mesh
 end
 
-# XXX needs test
-def traverse_node(node_elem, parent_transform, id_elem_hash)
+class Material
+  attr_accessor :name, :ambient, :diffuse
+
+  def initialize(name, ambient=[0,0,0], diffuse=[0,0,0])
+    @name = name
+    @ambient = ambient
+    @diffuse = diffuse
+  end
+
+  def ==(material)
+    if @name != material.name or
+        ambient_type != material.ambient_type or
+        diffuse_type != material.diffuse_type
+      return false
+    end
+
+    if ambient_type == :texture  and  @ambient != material.ambient
+      return false
+    elsif ambient_type == :color  and  !nested_array_equal(@ambient, material.ambient)
+      return false
+    end
+
+    if diffuse_type == :texture  and  @diffuse != material.diffuse
+      return false
+    elsif diffuse_type == :color  and  !nested_array_equal(@diffuse, material.diffuse)
+      return false
+    end
+
+    return true
+  end
+
+  def initialize_copy(source)
+    super
+    @name = source.name.clone
+    @ambient = source.ambient.clone
+    @diffuse = source.diffuse.clone
+  end
+
+  def self.material_property_type(val)
+    if val.class == String
+      :texture
+    elsif val.class == Array
+      :color
+    else
+      raise ColladaError.new("unknown material property type")
+    end
+  end
+
+  def ambient_type()
+    Material.material_property_type(@ambient)
+  end
+
+  def diffuse_type()
+    Material.material_property_type(@diffuse)
+  end
+
+  def image_refs()
+    image_refs = []
+    if ambient_type == :texture
+      image_refs << @ambient
+    end
+    if diffuse_type == :texture
+      image_refs << @diffuse
+    end
+    image_refs
+  end
+
+  def strip_image_ref_dirs()
+    if ambient_type == :texture
+      @ambient = path_basename_and_suffix(@ambient)
+    end
+    if diffuse_type == :texture
+      @diffuse = path_basename_and_suffix(@diffuse)
+    end
+  end    
+end
+
+def find_sid_match(root, sid)
+  matching_elems = []
+  root.each_recursive do |elem|
+    if elem.attributes['sid'] == sid
+      matching_elems << elem
+    end
+  end
+  if matching_elems.empty?
+    raise ColladaError.new("failed to find an element with sid=#{sid} under <#{root_elem.name}>")
+  else
+    matching_elems[0]
+  end
+end
+
+def read_texture(texture_elem, effect_elem, id_elem_hash)
+  sampler_sid = get_attr_str(texture_elem, 'texture')
+  sampler_newparam_elem = find_sid_match(effect_elem, sampler_sid)
+  if sampler_newparam_elem.name != 'newparam'
+    raise ColladaError.new("expected <newparam>, got #{sampler_newparam_elem.name}")
+  end
+  sampler2D_elem = get_child_elem(sampler_newparam_elem, 'sampler2D')
+  source_elem = get_child_elem(sampler2D_elem, 'source')
+
+  surface_sid = source_elem.text
+  surface_newparam_elem = find_sid_match(effect_elem, surface_sid)
+  if surface_newparam_elem.name != 'newparam'
+    raise ColladaError.new("expected <newparam>, got #{surface_newparam_elem.name}")
+  end
+  surface_elem = get_child_elem(surface_newparam_elem, 'surface')
+  surface_type = get_attr_str(surface_elem, 'type')
+  if surface_type != '2D'
+    raise ColladaError.new("can't handle <surface> with type=#{surface_type}")
+  end
+  init_from_elem = get_child_elem(surface_elem, 'init_from')
+
+  image_id = init_from_elem.text
+  image_elem = id_to_elem(image_id, id_elem_hash)
+  init_from_elem = get_child_elem(image_elem, 'init_from')
+  init_from_elem.text
+end
+
+def read_color(color_elem)
+  array = read_float_array(color_elem)
+  if array.count != 4
+    raise ColladaError.new("expected 4 values in <color>, got #{array.count}")
+  end
+  array[0..2]
+end
+
+def read_material_property(parent_elem, property_name, effect_elem, id_elem_hash)
+  property_elem = parent_elem.elements[property_name]
+  if !property_elem
+    return [0, 0, 0]
+  end
+
+  texture_elem = property_elem.elements['texture']
+  if texture_elem
+    return read_texture(texture_elem, effect_elem, id_elem_hash)
+  end
+
+  color_elem = property_elem.elements['color']
+  if color_elem
+    return read_color(color_elem)
+  end
+
+  ColladaError.new("missing <texture> or <color> in #{property_name}")
+end
+
+def uniquify_material_name(name, material_count_hash)
+  count = material_count_hash[name]
+  if count
+    material_count_hash[name] = count+1
+    name + '-' + (count+1).to_s
+  else
+    material_count_hash[name] = 1
+    name
+  end
+end
+
+def read_material(material_elem, id_elem_hash, material_count_hash)
+  instance_effect_elem = get_child_elem(material_elem, 'instance_effect')
+  effect_elem = elem_url_ref_to_elem(get_child_elem(material_elem, 'instance_effect'), 'url', id_elem_hash)
+  profile_elem = get_child_elem(effect_elem, 'profile_COMMON')
+  technique_elem = get_child_elem(profile_elem, 'technique')
+  lambert_elem = get_child_elem(technique_elem, 'lambert')
+
+  material = Material.new(uniquify_material_name(get_attr_str(material_elem, 'id'), material_count_hash))
+  material.ambient = read_material_property(lambert_elem, 'ambient', effect_elem, id_elem_hash)
+  material.diffuse = read_material_property(lambert_elem, 'diffuse', effect_elem, id_elem_hash)
+  material
+end
+
+def read_bind_material(bind_material_elem)
+  technique_elem = get_child_elem(bind_material_elem, 'technique_common')
+  instance_material_elems = technique_elem.get_elements('instance_material')
+  material_symbol_hash = {}
+  instance_material_elems.each do |elem|
+    symbol = get_attr_str(elem, 'symbol')
+    target = read_url(elem, 'target')
+    material_symbol_hash[symbol] = target
+    bind_vertex_input_elems = elem.get_elements('bind_vertex_input')
+    if bind_vertex_input_elems.count > 1
+      raise ColladaError.new("don't support more than one <bind_vertex_input> in an <instance_material>")
+    end
+    if !bind_vertex_input_elems.empty?
+      verify_attr_val(bind_vertex_input_elems[0], 'input_semantic', 'TEXCOORD')
+      verify_attr_val(bind_vertex_input_elems[0], 'input_set', '0')
+    end
+  end
+  material_symbol_hash
+end
+
+def traverse_node(node_elem, parent_transform, id_elem_hash, material_count_hash)
   node = read_node(node_elem)
   transform = node.transform ? matrix_mult(parent_transform, node.transform) : parent_transform
 
   # read geoms
   meshes = []
-  node.instance_geoms.each do |geom_id|
-    geom_elem = id_to_elem(geom_id, id_elem_hash)
-    geom_meshes = read_geometry(geom_elem, id_elem_hash)
+  node.instance_geoms.each do |instance_geom|
+    geom_elem = id_to_elem(instance_geom.id, id_elem_hash)
+    geom_meshes = read_geometry(geom_elem, id_elem_hash,
+                                instance_geom.material_symbol_hash, material_count_hash)
     meshes.concat(geom_meshes)
   end
 
@@ -645,20 +876,20 @@ def traverse_node(node_elem, parent_transform, id_elem_hash)
   meshes = meshes.map { |mesh| pretransform_mesh(mesh, transform) }
 
   child_node_meshes = node.child_node_elems.map do |child_node_elem|
-    traverse_node(child_node_elem, transform, id_elem_hash)
+    traverse_node(child_node_elem, transform, id_elem_hash, material_count_hash)
   end
 
   instance_node_meshes = node.instance_nodes.map do |node_id|
-    traverse_node(id_to_elem(node_id, id_elem_hash), transform, id_elem_hash)
+    traverse_node(id_to_elem(node_id, id_elem_hash), transform, id_elem_hash, material_count_hash)
   end
 
   [meshes, child_node_meshes, instance_node_meshes].flatten
 end
 
-# XXX needs test
 # returns a list of Meshes with all positions and normals pre-transformed
 def traverse_scene(doc)
   id_elem_hash = build_id_elem_hash(doc.root)
+  material_count_hash = {}
   scene = doc.elements['COLLADA/scene']
   if scene == nil
     raise ColladaError.new("couldn't find <scene>")
@@ -666,13 +897,12 @@ def traverse_scene(doc)
   visual_scene = elem_url_ref_to_elem(get_child_elem(scene, 'instance_visual_scene'), 'url', id_elem_hash)
   meshes = []
   visual_scene.elements.each('node') do |node_elem|
-    meshes.concat(traverse_node(node_elem, identity_matrix(4), id_elem_hash))
+    meshes.concat(traverse_node(node_elem, identity_matrix(4), id_elem_hash, material_count_hash))
   end
   meshes
 end
 
-# XXX needs test
-def to_obj(filename, meshes)
+def to_obj(filename, meshes, material_file_name)
   print_vertex = lambda do |io, vertex, vertex_format|
     # XXX currently we output dummy texture coordinates and normals for meshes that
     # don't have those, to keep the absolute-based indexing happy. i should switch to
@@ -715,6 +945,11 @@ def to_obj(filename, meshes)
   end
 
   print_mesh = lambda do |io, mesh, vertex_offset|
+    # XXX if i don't have a material, use a default
+    if mesh.material
+      io.printf("usemtl %s\n", mesh.material.name)
+    end
+
     mesh.vertices.each do |vertex|
       print_vertex.call(io, vertex, mesh.vertex_format)
     end
@@ -726,6 +961,7 @@ def to_obj(filename, meshes)
   end
 
   f = File.open(filename, 'w')
+  f.printf("mtllib %s\n", material_file_name)
   total_vertex_count = 0
   meshes.each do |mesh|
     print_mesh.call(f, mesh, total_vertex_count)
@@ -733,7 +969,36 @@ def to_obj(filename, meshes)
   end
 end
 
-# XXX needs test
+def get_material_list(meshes)
+  set = Set.new
+  meshes.each do |mesh|
+    if mesh.material
+      set.add(mesh.material)
+    end
+  end
+  set.to_a
+end
+
+def to_mtl(filename, materials)
+  print_material_property = lambda do |io, property, mtl_prefix|
+    if Material.material_property_type(property) == :texture
+      io.printf("%s 1 1 1\n", mtl_prefix)
+      io.printf("map_%s %s\n", mtl_prefix, property)
+    else
+      io.printf("%s %f %f %f\n", mtl_prefix, property[0], property[1], property[2])
+    end
+  end
+
+  file = File.open(filename, 'w')
+  materials.each do |material|
+    file.printf("newmtl %s\n", material.name)
+    file.printf("illum 1\n")
+    print_material_property.call(file, material.ambient, 'Ka')
+    print_material_property.call(file, material.diffuse, 'Kd')
+    file.printf("\n")
+  end
+end
+
 def path_suffix(path)
   index = path.index('.')
   if index == nil
@@ -743,12 +1008,38 @@ def path_suffix(path)
   end
 end
 
-# XXX needs test
 def path_basename(path)
   File.basename(path, path_suffix(path))
 end
 
-# XXX needs test
+def path_basename_and_suffix(path)
+  File.basename(path)
+end
+
+def path_dirname(path)
+  File.dirname(path)
+end
+
+def path_clean(path)
+  Pathname.new(path).cleanpath.to_s
+end
+
+def path_join(*paths)
+  if paths.empty?
+    ""
+  else
+    full_path = path_clean(paths[0])
+    paths[1..-1].each do |path|
+      if Pathname.new(path).absolute?
+        full_path = path_clean(path)
+      else
+        full_path = path_clean(File.join(full_path, path))
+      end
+    end
+    full_path.to_s
+  end
+end
+
 def capture_stdout_stderr
   orig_stdout, orig_stderr = $stdout, $stderr
   $stdout, $stderr = StringIO.new, StringIO.new
@@ -758,12 +1049,72 @@ ensure
   $stdout, $stderr = orig_stdout, orig_stderr
 end
 
+def get_image_path(model_file_path, image_path)
+  path_join(path_dirname(model_file_path), image_path)
+end
+
+class ZipCopier
+  def initialize(zip, model_file_path)
+    @zip = zip
+    @model_file_path = model_file_path
+  end
+
+  def copy(from_file, to_file)
+    full_from_file = get_image_path(@model_file_path, from_file)
+    capture_stdout_stderr do
+      if @zip.find_entry(full_from_file)
+        @zip.extract(full_from_file, to_file)
+        true
+      else
+        false
+      end
+    end
+  end
+end
+
+class DiskCopier
+  def initialize(model_file_path)
+    @model_file_path = model_file_path
+  end
+
+  def copy(from_file, to_file)
+    full_from_file = get_image_path(@model_file_path, from_file)
+    if File.exists?(full_from_file)
+      FileUtils.cp(full_from_file, to_file)
+      true
+    else
+      false
+    end
+  end
+end
+
+def fix_material_image_references(materials)
+  image_copy_hash = {}
+  materials.each do |material|
+    image_refs = material.image_refs()
+    image_refs.each do |image_ref|
+      image_copy_hash[image_ref] = path_basename_and_suffix(image_ref)
+    end
+    material.strip_image_ref_dirs()
+  end
+  image_copy_hash
+end
+
+def copy_images(image_copy_hash, output_dir, copier)
+  image_copy_hash.each do |from, to|
+    to_full = path_join(output_dir, to)
+    if !copier.copy(from, to_full)
+      puts "failed to copy '#{from}' to '#{to_full}'"
+    end
+  end
+end
+
 # main
 if $0 == __FILE__
   options = {}
 
   optparse = OptionParser.new do |opts|
-    opts.banner = "Usage: collada-to-obj [options] collada-file obj-file"
+    opts.banner = "Usage: collada-to-obj [options] collada-file output-dir"
 
     opts.on('-h', '--help', 'print help and exit') do
       puts opts
@@ -772,8 +1123,13 @@ if $0 == __FILE__
 
     # XXX remove this at some point
     options[:blender_shrink] = false
-    opts.on('', '--blender-shrink', 'shrink and rotate the model to fit in blender (temporary hack)') do
+    opts.on('-b', '--blender-shrink', 'shrink and rotate the model to fit in blender (temporary hack)') do
       options[:blender_shrink] = true
+    end
+
+    options[:clean_output_dir]
+    opts.on('-c', '--clean-output-dir', 'if the output directory already exists, delete and recreate it') do
+      options[:clean_output_dir] = true
     end
   end
 
@@ -785,6 +1141,7 @@ if $0 == __FILE__
   end
 
   input_io = nil
+  texture_copier = nil
 
   input_file = ARGV[0]
   if not File.exists?(input_file)
@@ -818,13 +1175,17 @@ if $0 == __FILE__
     capture_stdout_stderr do
       input_io = StringIO.new(zip.read(model_file_name))
     end
+
+    texture_copier = ZipCopier.new(zip, model_file_name)
   else
     input_io = File.open(input_file)
+    texture_copier = DiskCopier.new(input_file)
   end
 
-  output_file = path_basename(input_file) + '.obj'
+  output_basename = path_basename(input_file)
+  output_dir = output_basename + '-obj'
   if ARGV.count > 1
-    output_file = ARGV[1]
+    output_dir = ARGV[1]
   end
 
   # XXX why does File.writable? return false for files I can in fact write to? we'll
@@ -833,6 +1194,16 @@ if $0 == __FILE__
   #   puts "file '#{output_file}' is not writable"
   #   exit
   # end
+
+  if options[:clean_output_dir]
+    if File.exists?(output_dir)
+      FileUtils.rm_r(output_dir)
+    end
+  end
+
+  if !File.exists?(output_dir)
+    FileUtils.mkdir_p(output_dir)
+  end
 
   doc = REXML::Document.new(input_io)
   meshes = traverse_scene(doc)
@@ -843,5 +1214,11 @@ if $0 == __FILE__
     meshes = meshes.map { |mesh| pretransform_mesh(mesh, transform) }
   end
 
-  to_obj(output_file, meshes)
+  obj_file_name = path_join(output_dir, output_basename + '.obj')
+  mtl_file_name = path_join(output_dir, output_basename + '.mtl')
+  materials = get_material_list(meshes)
+  image_copy_hash = fix_material_image_references(materials)
+  to_obj(obj_file_name, meshes, path_basename_and_suffix(mtl_file_name))
+  to_mtl(mtl_file_name, materials)
+  copy_images(image_copy_hash, output_dir, texture_copier)
 end

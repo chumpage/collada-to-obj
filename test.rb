@@ -190,7 +190,18 @@ class TestDaeToObj < Test::Unit::TestCase
       <node id="node1" name="my-node">
         <matrix>1 0 0 3 0 1 0 4 0 0 1 5 0 0 0 1</matrix>
         <instance_node url="#node2"/>
-        <instance_geometry url="#mesh1"/>
+        <instance_geometry url="#mesh1">
+          <bind_material>
+             <technique_common>
+                <instance_material symbol="material1" target="#material1">
+                   <bind_vertex_input semantic="UVSET0" input_semantic="TEXCOORD" input_set="0"/>
+                </instance_material>
+                <instance_material symbol="material2" target="#material2">
+                   <bind_vertex_input semantic="UVSET0" input_semantic="TEXCOORD" input_set="0"/>
+                </instance_material>
+             </technique_common>
+          </bind_material>
+        </instance_geometry>
         <node id="child-node">
           <instance_node url="#node2"/>
         </node>
@@ -208,7 +219,8 @@ class TestDaeToObj < Test::Unit::TestCase
     node1.id = 'node1'
     node1.transform = [[1, 0, 0, 3], [0, 1, 0, 4], [0, 0, 1, 5], [0, 0, 0, 1]]
     node1.instance_nodes << 'node2'
-    node1.instance_geoms << 'mesh1'
+    node1.instance_geoms << InstanceGeom.new('mesh1', {'material1' => 'material1',
+                                                       'material2' => 'material2'})
     node1.child_node_elems << child_node_elem
 
     node2 = Node.new
@@ -302,51 +314,64 @@ class TestDaeToObj < Test::Unit::TestCase
   end
 
   @@triangles_xml_1 = <<-TEST_XML
-    <mesh>
-      <source id="mesh-position">
-         <float_array id="mesh-position-array" count="6">0 0 0 1 1 1</float_array>
-         <technique_common>
-            <accessor source="#mesh-position-array" count="2" stride="3">
-               <param name="X" type="float"/>
-               <param name="Y" type="float"/>
-               <param name="Z" type="float"/>
-            </accessor>
-         </technique_common>
-      </source>
-      <source id="mesh-normal">
-         <float_array id="mesh-normal-array" count="6">10 10 10 11 11 11</float_array>
-         <technique_common>
-            <accessor source="#mesh-normal-array" count="2" stride="3">
-               <param name="X" type="float"/>
-               <param name="Y" type="float"/>
-               <param name="Z" type="float"/>
-            </accessor>
-         </technique_common>
-      </source>
-      <source id="mesh-uv">
-         <float_array id="mesh-uv-array" count="4">20 20 21 21</float_array>
-         <technique_common>
-            <accessor source="#mesh-uv-array" count="2" stride="2">
-               <param name="S" type="float"/>
-               <param name="T" type="float"/>
-            </accessor>
-         </technique_common>
-      </source>
-      <vertices id="mesh-vertex">
-         <input semantic="POSITION" source="#mesh-position"/>
-      </vertices>
-      <triangles material="some-material" count="2">
-         <input semantic="VERTEX" source="#mesh-vertex" offset="0"/>
-         <input semantic="NORMAL" source="#mesh-normal" offset="1"/>
-         <input semantic="TEXCOORD" source="#mesh-uv" offset="2" set="0"/>
-         <p>0 0 0  0 1 0  1 1 1    0 0 0  0 1 0  1 1 1</p>
-      </triangles>
-    </mesh>
+    <COLLADA>
+      <effect id="effect1">
+         <profile_COMMON>
+            <technique sid="COMMON">
+               <lambert/>
+            </technique>
+         </profile_COMMON>
+      </effect>
+      <material id="material1">
+         <instance_effect url="#effect1"/>
+      </material>
+      <mesh>
+        <source id="mesh-position">
+           <float_array id="mesh-position-array" count="6">0 0 0 1 1 1</float_array>
+           <technique_common>
+              <accessor source="#mesh-position-array" count="2" stride="3">
+                 <param name="X" type="float"/>
+                 <param name="Y" type="float"/>
+                 <param name="Z" type="float"/>
+              </accessor>
+           </technique_common>
+        </source>
+        <source id="mesh-normal">
+           <float_array id="mesh-normal-array" count="6">10 10 10 11 11 11</float_array>
+           <technique_common>
+              <accessor source="#mesh-normal-array" count="2" stride="3">
+                 <param name="X" type="float"/>
+                 <param name="Y" type="float"/>
+                 <param name="Z" type="float"/>
+              </accessor>
+           </technique_common>
+        </source>
+        <source id="mesh-uv">
+           <float_array id="mesh-uv-array" count="4">20 20 21 21</float_array>
+           <technique_common>
+              <accessor source="#mesh-uv-array" count="2" stride="2">
+                 <param name="S" type="float"/>
+                 <param name="T" type="float"/>
+              </accessor>
+           </technique_common>
+        </source>
+        <vertices id="mesh-vertex">
+           <input semantic="POSITION" source="#mesh-position"/>
+        </vertices>
+        <triangles material="some-material" count="2">
+           <input semantic="VERTEX" source="#mesh-vertex" offset="0"/>
+           <input semantic="NORMAL" source="#mesh-normal" offset="1"/>
+           <input semantic="TEXCOORD" source="#mesh-uv" offset="2" set="0"/>
+           <p>0 0 0  0 1 0  1 1 1    0 0 0  0 1 0  1 1 1</p>
+        </triangles>
+      </mesh>
+    </COLLADA>
   TEST_XML
 
   def test_read_triangles
     root = get_root(@@triangles_xml_1)
-    triangles_elem = get_child_elem(root, 'triangles')
+    mesh_elem = get_child_elem(root, 'mesh')
+    triangles_elem = get_child_elem(mesh_elem, 'triangles')
     id_elem_hash = build_id_elem_hash(root)
 
     indices = [0,1,2, 0,1,2]
@@ -354,8 +379,9 @@ class TestDaeToObj < Test::Unit::TestCase
                 [[0,0,0], [11,11,11], [20,20]],
                 [[1,1,1], [11,11,11], [21,21]]]
 
-    assert_equal(Mesh.new(vertices, indices, :pos_norm_tex),
-                 read_triangles(triangles_elem, id_elem_hash))
+    material = Material.new('material1')
+    assert_equal(Mesh.new(vertices, indices, :pos_norm_tex, material),
+                 read_triangles(triangles_elem, id_elem_hash, {'some-material' => 'material1'}, {}))
   end
 
   def test_pretransform_mesh
@@ -363,7 +389,7 @@ class TestDaeToObj < Test::Unit::TestCase
     vertices = [[[0,1,2], [1,1,1],    [20,20]],
                 [[1,2,3], [-1,-1,-1], [20,20]],
                 [[2,3,4], [0,1,0],    [21,21]]]
-    mesh = Mesh.new(vertices, indices, :pos_norm_tex)
+    mesh = Mesh.new(vertices, indices, :pos_norm_tex, Material.new(''))
 
     transform = matrix_mult(translation_matrix(3,4,5),
                             scale_matrix(1,2,3),
@@ -383,9 +409,79 @@ class TestDaeToObj < Test::Unit::TestCase
     # discrepancy later.
     epsilon_tmp = $epsilon
     $epsilon = 0.01
-    assert_equal(Mesh.new(vertices_expected, indices, mesh.vertex_format),
+    assert_equal(Mesh.new(vertices_expected, indices, mesh.vertex_format, Material.new('')),
                  pretransform_mesh(mesh, transform))
     $epsilon = epsilon_tmp
+  end
+
+  @@material_xml_1 = <<-TEST_XML
+    <COLLADA>
+      <image id="image1">
+         <init_from>../images/texture0.jpg</init_from>
+      </image>
+      <effect id="effect1">
+         <profile_COMMON>
+            <newparam sid="surface1">
+               <surface type="2D">
+                  <init_from>image1</init_from>
+               </surface>
+            </newparam>
+            <newparam sid="sampler1">
+               <sampler2D>
+                  <source>surface1</source>
+               </sampler2D>
+            </newparam>
+            <technique sid="COMMON">
+               <lambert>
+                  <emission>
+                     <color>0.000000 0.000000 0.000000 1</color>
+                  </emission>
+                  <ambient>
+                     <color>0.000000 0.000000 0.000000 1</color>
+                  </ambient>
+                  <diffuse>
+                     <texture texture="sampler1" texcoord="UVSET0"/>
+                  </diffuse>
+               </lambert>
+            </technique>
+            <extra>
+               <technique profile="GOOGLEEARTH">
+                  <double_sided>1</double_sided>
+               </technique>
+            </extra>
+         </profile_COMMON>
+      </effect>
+      <material id="material1">
+         <instance_effect url="#effect1"/>
+      </material>
+    </COLLADA>
+  TEST_XML
+
+  def test_read_material
+    root = get_root(@@material_xml_1)
+    material_elem = get_child_elem(root, 'material')
+    id_elem_hash = build_id_elem_hash(root)
+    material = read_material(material_elem, id_elem_hash, {})
+    assert_equal(Material.new('material1', [0, 0, 0], '../images/texture0.jpg'), material)
+  end
+
+  @@bind_material_xml_1 = <<-TEST_XML
+    <bind_material>
+       <technique_common>
+          <instance_material symbol="material1" target="#material1">
+             <bind_vertex_input semantic="UVSET0" input_semantic="TEXCOORD" input_set="0"/>
+          </instance_material>
+          <instance_material symbol="material2" target="#material2">
+             <bind_vertex_input semantic="UVSET0" input_semantic="TEXCOORD" input_set="0"/>
+          </instance_material>
+       </technique_common>
+    </bind_material>
+  TEST_XML
+
+  def test_read_bind_material
+    bind_material_elem = get_root(@@bind_material_xml_1)
+    symbol_hash = read_bind_material(bind_material_elem)
+    assert_equal({'material1' => 'material1', 'material2' => 'material2'}, symbol_hash)
   end
 
 end
