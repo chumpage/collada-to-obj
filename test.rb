@@ -2,7 +2,7 @@
 
 require "test/unit"
 require 'rexml/document'
-load "collada-to-obj"
+load "collada-to-obj.rb"
 
 def get_root(xml_str)
   REXML::Document.new(xml_str).root()

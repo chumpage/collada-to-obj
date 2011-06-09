@@ -1114,7 +1114,7 @@ if $0 == __FILE__
   options = {}
 
   optparse = OptionParser.new do |opts|
-    opts.banner = "Usage: collada-to-obj [options] collada-file output-dir"
+    opts.banner = "Usage: collada-to-obj.rb [options] collada-file output-dir"
 
     opts.on('-h', '--help', 'print help and exit') do
       puts opts
