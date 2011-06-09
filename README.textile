@@ -1,0 +1,23 @@
+Collada-to-obj is a Ruby program to convert Collada models to obj format.
+
+h4. Setup
+
+* Install Ruby. I tested with 1.9, but 1.8 may also work.
+* Install the zip gem if you want to work with .kmz models. 'gem install zip'.
+
+h4. Usage
+
+Just call the program with the Collada model to convert as the first argument, and the output directory as the second argument (optional).
+
+* collada-to-obj.rb model.dae
+* collada-to-obj.rb model.kmz output-dir
+
+The output directory will contain a .obj file, a .mtl file, and all texture images used by the model.
+
+h4. Known Issues
+
+* I only tested Collada models from Google's 3D Warehouse. There are a lot of valid Collada models which won't make it through the converter succesfully. Some of the more significant problem areas are noted below.
+* The &lt;double_sided&gt; flag on materials isn't supported for now. You'll only see the front side of &lt;double_sided&gt; meshes.
+* Only &lt;matrix&gt; transforms are supported.
+* Only &lt;triangles&gt; geometry is supported.
+* Only &lt;lambert&gt; materials are supported, with only &lt;ambient&gt; and &lt;diffuse&gt; material properties converted.
